@@ -1,13 +1,6 @@
 #include <stdio.h>
 #include <assert.h>
-#define MAX_STRING 14
-#define AMOUNT 2
-
-int get_sizes(FILE* stream);
-int read_text(char strings_array[][MAX_STRING], FILE* stream);
-int swap_strings(char strings_array[][MAX_STRING], size_t s1_ptr, size_t s2_ptr);
-int print_strings(char strings_array[][MAX_STRING]);
-int sort_strings(char strings_array[][MAX_STRING]);
+#include "../header/sqvrt_strings.h"
 
 int get_sizes(FILE* stream) {
     if (!stream) return 1;
@@ -68,25 +61,5 @@ int print_strings(char strings_array[][MAX_STRING]) {
     }
     return 0;
 }
-
-int q_sort_strings(char strings_array[][MAX_STRING]) {
-    assert(strings_array);
-    return 0;
-}
-
-
-
-int main() {
-    FILE* f = fopen("text.txt", "rb");
-    if (get_sizes(f)) return 1;
-
-    char strings_array[AMOUNT][MAX_STRING] = {{}};
-    read_text(strings_array, f);
-    fclose(f);
-    swap_strings(strings_array, 1, 3);
-    print_strings(strings_array);
-}
-
-
 
 
