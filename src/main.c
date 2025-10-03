@@ -1,50 +1,63 @@
 #include <stdio.h>
 #include <stdlib.h>
-#include <sys/stat.h>
-#include "../header/ptr_strings.h"
-#include "../header/strings_operations.h"
 
-typedef struct {
-    const char* input_file_path;
-    const char* output_file_path;
-    char* buffer;
-    struct stat inp_file_stat;
-} information;
+#include "info_struct.h"
+#include "logs.h"
+#include "ptr_strings.h"
 
+static int initialise(information* info, text_t* text, logs_t* log_info) {
+    if (info == NULL || text == NULL || log_info == NULL) {
+        fprintf(stderr, "initialise: invalid arguments\n");
+        return -1;
+    }
 
-int main() {
-    information info = {
-        .input_file_path = "text.txt",
-        .output_file_path = "output.txt",
-        .buffer = NULL
-    };
-    if (stat(info.input_file_path, &(info.inp_file_stat)) == -1) return -fprintf(stderr, "ERROR OF GETTING FILE INFORMATION\n");
+    LogsErrno log_status = init_logs(log_info);
+    if (log_status != LogsOk) {
+        fprintf(stderr, "Logging initialisation warning: %s\n", LogsErrMsg(log_status));
+    }
 
-    FILE* f = fopen(info.input_file_path, "rb");
+    TextErrno text_status = init_text(text);
+    if (text_status != TextOk) {
+        fprintf(stderr, "Text initialisation failed: %s\n", TextErrMsg(text_status));
+        return -1;
+    }
 
-    if (f == NULL) return -fprintf(stderr, "FILE READING ERROR");
+    InfoErrno info_status = init_info(info, log_info);
+    if (info_status != InfoOk) {
+        return -1;
+    }
 
-    text text = {
-        .str_array = NULL,
-        .size = 0
-    };
+    return 0;
+}
 
-    if (read_text(&text, &info.buffer, (size_t)info.inp_file_stat.st_size, f)) return fprintf(stderr, "ERROR WHILE READING FILE\n");
-    fclose(f);
+static void teardown(information* info, text_t* text, logs_t* log_info) {
+    destruct_text(text);
+    destruct_info(info);
+    destruct_logs(log_info);
+}
 
-    FILE* output = fopen(info.output_file_path, "w");
-    qsort(text.str_array, text.size, sizeof(string), straight_comparator);
-    // bubble_sort_strings(&text, 0);
-    write_strings(&text, output);
+int main(void) {
+    information info = {};
+    text_t text = {};
+    logs_t log_info = {};
 
-    qsort(text.str_array, text.size, sizeof(string), reverse_comparator);
-    // bubble_sort_strings(&text, 1);
-    write_strings(&text, output);
+    if (initialise(&info, &text, &log_info) != 0) {
+        teardown(&info, &text, &log_info);
+        return EXIT_FAILURE;
+    }
 
-    fprintf(output, "%s\n", info.buffer);
-    fclose(output);
+    TextErrno text_status = read_text(&text, &info, &log_info);
+    if (text_status != TextOk) {
+        teardown(&info, &text, &log_info);
+        return EXIT_FAILURE;
+    }
 
-    free(info.buffer);
-    free(text.str_array);
-    return printf("DONE\n") && 0;
+    text_status = make_sortings(&text, &info, &log_info);
+    if (text_status != TextOk) {
+        teardown(&info, &text, &log_info);
+        return EXIT_FAILURE;
+    }
+
+    teardown(&info, &text, &log_info);
+    return EXIT_SUCCESS;
 }

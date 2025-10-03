@@ -1,18 +1,16 @@
 #ifndef STRINGS_OPERATIONS_H
 #define STRINGS_OPERATIONS_H
 
-#define DEFAULT_SIZE 512
-#define SIZEUP 2
-#define TRUE 1
-#define FALSE 0
+#include <stddef.h>
+#include <stdio.h>
 
-int is_space(char symb);
-int endof_string(char symb);
-int has_alpha(char* s);
-const char *my_strchr(const char *str, int symbol);
-size_t my_strlen(const char *str);
-int straight_strcmp(char* s1, char* s2);
-int reverse_strcmp(char* s1, char* s2);
-
+int is_space(int symbol);
+int endof_string(char symbol);
+int has_alpha(const char* string);
+const char* my_strchr(const char* string, int symbol);
+size_t my_strlen(const char* string);
+int straight_strcmp(const char* first, const char* second);
+int reverse_strcmp(const char* first, const char* second);
+int print_string(const char* string, FILE* stream);
 
 #endif

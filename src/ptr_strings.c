@@ -1,185 +1,366 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
 #include "../header/ptr_strings.h"
 #include "../header/strings_operations.h"
+#include "../header/info_struct.h"
 
-int read_text(text* text, char** buffer, size_t size, FILE* stream) {
-    if (stream == NULL) {
-        return fprintf(stderr, "ERRROR IN FUNC \"read_text\": NULL POINTER ON IMPUT STREAM\n");
+static void log_info_failure(logs_t* log_info, InfoErrno error, const information* info) {
+    if (log_info == NULL || log_info->file == NULL) {
+        return;
     }
+
+    WRITE_ERR(InfoErrMsg(error), log_info->file);
+    show_info(info, log_info->file);
+}
+
+static void log_text_failure(logs_t* log_info, TextErrno error, const char* context) {
+    if (log_info == NULL || log_info->file == NULL) {
+        return;
+    }
+
+    WRITE_ERR(TextErrMsg(error), log_info->file);
+    if (context != NULL) {
+        fprintf(log_info->file, "\tContext: %s\n", context);
+    }
+}
+
+static TextErrno allocate_string_slots(text_t* text, size_t count, logs_t* log_info) {
     if (text == NULL) {
-        return fprintf(stderr, "ERROR IN FUNC \"read_text\": NULL POINTER ON TEXT STRUCTURE\n");
+        log_text_failure(log_info, TextInvalidArgs, "allocate_string_slots");
+        return TextInvalidArgs;
     }
 
-    *buffer = (char*) calloc(size + 1, sizeof(char));
-
-    if (*buffer == NULL) {
-        return fprintf(stderr, "ERROR OF ALLOCATING BUFFER IN FUNC \"read_text\"\n");
-    }
-
-    if (fread(*buffer, sizeof(*buffer), size, stream) == 0) {
-        return fprintf(stderr, "ERROR OF READING FILE IN FUNC \"read_text\"\n");
-    }
-    //(*buffer)[size] ='\0';
-
-    char* tmp = strchr(*buffer, '\0');
-    //printf("tmp: %d\n", *tmp);
-    if (tmp != *buffer + size) {
-        return fprintf(stderr, "ERROR OF READING FILE IN FUNC \"read_text\": \
-        READ SIZE DOESN'T MATCH FILE SIZE:\nEXPECTED: %lu, GOT: %lu\n", size, (size_t)(tmp - *buffer));
-    }
-
-    //fseek(stream, 0, SEEK_SET);
+    free(text->str_array);
+    text->str_array = NULL;
     text->size = 0;
-    int contains_alpha = has_alpha(*buffer);
-    size_t max_string = 0;
-    size_t curr_string = 0;
-    for (size_t i = 0; i < size; i++) {
-        if (contains_alpha < 0) {
-            return fprintf(stderr, "ERROR IN FUNC \"read_text\": GOT ERROR WHILE CALLING \"has_alpha\"\n");
-        }
-        if (endof_string((*buffer)[i])) {
-            if (contains_alpha) {
-                (text->size)++;
-                max_string = max_string < curr_string ? curr_string : max_string;
-                curr_string = 0;
-            }
 
-            if ((*buffer)[i] != '\0') {
-                contains_alpha = has_alpha(*buffer + i + 1);
+    if (count == 0) {
+        return TextOk;
+    }
+
+    text->str_array = (string*) calloc(count, sizeof(string));
+    if (text->str_array == NULL) {
+        log_text_failure(log_info, TextAllocFail, "allocate_string_slots");
+        return TextAllocFail;
+    }
+
+    text->size = count;
+    return TextOk;
+}
+
+static size_t count_meaningful_strings(char* buffer, size_t size) {
+    if (buffer == NULL) {
+        return 0;
+    }
+
+    size_t count = 0;
+    size_t line_start = 0;
+
+    for (size_t i = 0; i <= size; ++i) {
+        if (i == size || buffer[i] == '\n' || buffer[i] == '\0') {
+            if (has_alpha(buffer + line_start) > 0) {
+                ++count;
             }
-            else {
-                break;
-            }
-        }
-        else {
-            curr_string++;
+            line_start = i + 1;
         }
     }
-    text->str_array= (string*) calloc(text->size, sizeof(string));
 
-    if (text->str_array == NULL) {
-        return fprintf(stderr, "ERROR OF ALLOCATING POINTER ARRAY IN FUNC \"read_text\"\n");
+    return count;
+}
+
+static TextErrno fill_string_slots(text_t* text, char* buffer, size_t size) {
+    if (text == NULL || buffer == NULL) {
+        return TextInvalidArgs;
     }
 
     size_t pos = 0;
-    size_t last_ns = 0;
-    for (size_t i = 0; (i < size) && (pos < text->size); i++) {
-        if (endof_string((*buffer)[i])) {
-            if (has_alpha(*buffer + last_ns) > 0) {
-                text->str_array[pos].ptr = *buffer + last_ns;
-                text->str_array[pos].size = i - last_ns;
-                pos++;
+    size_t line_start = 0;
+
+    for (size_t i = 0; i <= size && pos < text->size; ++i) {
+        if (i == size || buffer[i] == '\n' || buffer[i] == '\0') {
+            if (has_alpha(buffer + line_start) > 0) {
+                text->str_array[pos].ptr = buffer + line_start;
+                text->str_array[pos].size = i >= line_start ? i - line_start : 0;
+                ++pos;
             }
-            if ((*buffer)[i] != '\0') {
-                last_ns = i + 1;
-            }
-            else {
-                break;
-            }
+            line_start = i + 1;
         }
     }
-    // printf("BUFFER:\n%s\n", *buffer);
-    return 0;
+
+    if (pos < text->size) {
+        text->size = pos;
+    }
+
+    return TextOk;
 }
 
-
-int swap_strings(text* text, size_t s1_ptr, size_t s2_ptr) {
-    if (text->str_array == NULL) {
-        return fprintf(stderr, "ERROR IN FUNC \"swap_strings\": GOT NULL POINTER ON POINTER ARRAY\n");
+const char* TextErrMsg(TextErrno error) {
+    switch (error) {
+        case TextOk:            return "No text error";
+        case TextInvalidArgs:   return "Invalid arguments provided";
+        case TextInfoFailure:   return "Information verification failed";
+        case TextNullArray:     return "Text array is not initialised";
+        case TextAllocFail:     return "Failed to allocate text resources";
+        case TextIoError:       return "I/O error during text processing";
+        default:                return "Unknown text error";
     }
-    if (s1_ptr > text->size ||
-        s2_ptr > text->size) {
-            return fprintf(stderr, "ERROR IN FUNC \"swap_strings\": SWAP ELEMENT INDEX OUT OF RANGE\n");
+}
+
+TextErrno init_text(text_t* text) {
+    if (text == NULL) {
+        return TextInvalidArgs;
+    }
+
+    text->size = 0;
+    text->str_array = NULL;
+    return TextOk;
+}
+
+void destruct_text(text_t* text) {
+    if (text == NULL) {
+        return;
+    }
+
+    free(text->str_array);
+    text->str_array = NULL;
+    text->size = 0;
+}
+
+TextErrno read_text(text_t* text, information* info, logs_t* log_info) {
+    if (text == NULL || info == NULL) {
+        log_text_failure(log_info, TextInvalidArgs, "read_text");
+        return TextInvalidArgs;
+    }
+
+    InfoErrno info_error = verify_info(info);
+    if (info_error != InfoOk) {
+        log_info_failure(log_info, info_error, info);
+        return TextInfoFailure;
+    }
+
+    FILE* stream = fopen(info->input_file_path, "rb");
+    if (stream == NULL) {
+        log_info_failure(log_info, MissInpF, info);
+        return TextIoError;
+    }
+
+    free(info->buffer);
+    info->buffer = NULL;
+
+    size_t size = (size_t) info->inp_file_stat.st_size;
+    info->buffer = (char*) calloc(size + 1, sizeof(char));
+    if (info->buffer == NULL) {
+        fclose(stream);
+        log_text_failure(log_info, TextAllocFail, "read_text::buffer");
+        return TextAllocFail;
+    }
+
+    if (size > 0) {
+        size_t read = fread(info->buffer, sizeof(char), size, stream);
+        if (read != size) {
+            fclose(stream);
+            log_text_failure(log_info, TextIoError, "read_text::fread");
+            free(info->buffer);
+            info->buffer = NULL;
+            return TextIoError;
         }
-
-    string tmp = {
-        .ptr = NULL,
-        .size = 0
-    };
-    tmp = text->str_array[s1_ptr];
-    text->str_array[s1_ptr] = text->str_array[s2_ptr];
-    text->str_array[s2_ptr] = tmp;
-    //printf("Strings №%lu and №%lu were swapped\n", s1_ptr + 1, s2_ptr + 1);
-    return 0;
-}
-
-int print_strings(text* text) {
-    if (text->str_array == NULL) {
-        return fprintf(stderr, "ERROR IN FUNC \"print_strings\": NULL POINTER ON POINTERS ARRAY\n");
     }
 
-    for (size_t i = 0; i < text->size; i++) {
-        if (text->str_array[i].size == 0) {
+    info->buffer[size] = '\0';
+    fclose(stream);
+
+    size_t strings_count = count_meaningful_strings(info->buffer, size);
+    TextErrno allocation_status = allocate_string_slots(text, strings_count, log_info);
+    if (allocation_status != TextOk) {
+        return allocation_status;
+    }
+
+    TextErrno fill_status = fill_string_slots(text, info->buffer, size);
+    if (fill_status != TextOk) {
+        log_text_failure(log_info, fill_status, "read_text::fill");
+        return fill_status;
+    }
+
+    return TextOk;
+}
+
+TextErrno swap_strings(text_t* text, size_t first, size_t second, logs_t* log_info) {
+    if (text == NULL) {
+        log_text_failure(log_info, TextInvalidArgs, "swap_strings");
+        return TextInvalidArgs;
+    }
+    if (text->str_array == NULL) {
+        log_text_failure(log_info, TextNullArray, "swap_strings");
+        return TextNullArray;
+    }
+    if (first >= text->size || second >= text->size) {
+        log_text_failure(log_info, TextInvalidArgs, "swap_strings::range");
+        return TextInvalidArgs;
+    }
+
+    string tmp = text->str_array[first];
+    text->str_array[first] = text->str_array[second];
+    text->str_array[second] = tmp;
+
+    return TextOk;
+}
+
+TextErrno print_strings(const text_t* text, logs_t* log_info) {
+    if (text == NULL) {
+        log_text_failure(log_info, TextInvalidArgs, "print_strings");
+        return TextInvalidArgs;
+    }
+    if (text->str_array == NULL) {
+        log_text_failure(log_info, TextNullArray, "print_strings");
+        return TextNullArray;
+    }
+
+    for (size_t i = 0; i < text->size; ++i) {
+        if (text->str_array[i].ptr == NULL || text->str_array[i].size == 0) {
             continue;
         }
-
-        char* str_ptr = text->str_array[i].ptr;
-        //printf("String №%lu: ", i + 1);
-        while (*str_ptr != '\n' && *str_ptr != '\0') putchar(*str_ptr), str_ptr++;
-        putchar('\n');
-        //printf(" Size: %lu\n", text.str_array[i].size);
-
+        print_string(text->str_array[i].ptr, stdout);
     }
-    return 0;
+
+    return TextOk;
 }
 
-int write_strings(text* text, FILE* stream) {
+TextErrno write_strings(const text_t* text, FILE* stream) {
+    if (text == NULL) {
+        return TextInvalidArgs;
+    }
     if (text->str_array == NULL) {
-        return fprintf(stderr, "ERROR IN FUNC \"write_strings\": NULL POINTER ON POINTERS ARRAY\n");
+        return TextNullArray;
     }
     if (stream == NULL) {
-        return fprintf(stderr, "ERROR IN FUNC \"write_strings\": NULL POINTER ON OUTPUT FILE\n");
+        WRITE_ERR(TextErrMsg(TextIoError), stderr);
+        return TextIoError;
     }
 
-    for (size_t i = 0; i < text->size; i++) {
-        if (text->str_array[i].size == 0) {
+    for (size_t i = 0; i < text->size; ++i) {
+        if (text->str_array[i].ptr == NULL || text->str_array[i].size == 0) {
             continue;
         }
 
-        char* str_ptr = text->str_array[i].ptr;
-        //printf("String №%lu: ", i + 1);
-        while (*str_ptr != '\n' && *str_ptr != '\0') fputc(*str_ptr, stream), str_ptr++;
-        fputc('\n', stream);
-        //printf(" Size: %lu\n", text.str_array[i].size);
+        const char* str_ptr = text->str_array[i].ptr;
+        while (*str_ptr != '\n' && *str_ptr != '\0') {
+            if (fputc(*str_ptr, stream) == EOF) {
+                return TextIoError;
+            }
+            ++str_ptr;
+        }
+        if (fputc('\n', stream) == EOF) {
+            return TextIoError;
+        }
     }
-    fprintf(stream, "===========================================================================\n");
-    return 0;
+
+    if (fprintf(stream, "===========================================================================\n") < 0) {
+        return TextIoError;
+    }
+
+    return TextOk;
 }
 
-int straight_comparator(const void* par1, const void* par2) {
-    string s1 = *(string*) par1;
-    string s2 = *(string*) par2;
-    return straight_strcmp(s1.ptr, s2.ptr);
+int straight_comparator(const void* lhs, const void* rhs) {
+    const string first = *(const string*) lhs;
+    const string second = *(const string*) rhs;
+    return straight_strcmp(first.ptr, second.ptr);
 }
 
-int reverse_comparator(const void* par1, const void* par2) {
-    string s1 = *(string*) par1;
-    string s2 = *(string*) par2;
-    return reverse_strcmp(s1.ptr, s2.ptr);
+int reverse_comparator(const void* lhs, const void* rhs) {
+    const string first = *(const string*) lhs;
+    const string second = *(const string*) rhs;
+    return reverse_strcmp(first.ptr, second.ptr);
 }
 
-int bubble_sort_strings(text* text, int is_backwards) {
+TextErrno bubble_sort_strings(text_t* text, int is_backward, logs_t* log_info) {
+    if (text == NULL) {
+        log_text_failure(log_info, TextInvalidArgs, "bubble_sort_strings");
+        return TextInvalidArgs;
+    }
     if (text->str_array == NULL) {
-        return fprintf(stderr, "ERROR IN FUNC \"bubble_sort_strings\": NULL POINTER ON POINTERS ARRAY\n");
+        log_text_failure(log_info, TextNullArray, "bubble_sort_strings");
+        return TextNullArray;
     }
-    for (size_t r = 0; r < text->size; r++) {
-        for (size_t l = 1; l < text->size - r; l++) {
-            if (is_backwards ?
-                reverse_strcmp(text->str_array[l].ptr, text->str_array[l - 1].ptr) < 0 :
-                straight_strcmp(text->str_array[l].ptr, text->str_array[l - 1].ptr) < 0) {
-                swap_strings(text, l, l - 1);
+
+    for (size_t r = 0; r < text->size; ++r) {
+        for (size_t l = 1; l < text->size - r; ++l) {
+            int cmp = is_backward ?
+                reverse_strcmp(text->str_array[l].ptr, text->str_array[l - 1].ptr) :
+                straight_strcmp(text->str_array[l].ptr, text->str_array[l - 1].ptr);
+
+            if (cmp < 0) {
+                TextErrno swap_status = swap_strings(text, l, l - 1, log_info);
+                if (swap_status != TextOk) {
+                    return swap_status;
+                }
             }
         }
     }
-    return 0;
+
+    return TextOk;
 }
 
+TextErrno make_sortings(text_t* text, information* info, logs_t* log_info) {
+    if (text == NULL || info == NULL) {
+        log_text_failure(log_info, TextInvalidArgs, "make_sortings");
+        return TextInvalidArgs;
+    }
+    if (text->str_array == NULL) {
+        log_text_failure(log_info, TextNullArray, "make_sortings");
+        return TextNullArray;
+    }
+    if (info->output_stream == NULL) {
+        log_info_failure(log_info, NullOutFPtr, info);
+        return TextIoError;
+    }
 
+    qsort(text->str_array, text->size, sizeof(string), straight_comparator);
 
+    TextErrno write_status = write_strings(text, info->output_stream);
+    if (write_status != TextOk) {
+        log_text_failure(log_info, write_status, "make_sortings::straight");
+        return write_status;
+    }
 
+    qsort(text->str_array, text->size, sizeof(string), reverse_comparator);
 
+    write_status = write_strings(text, info->output_stream);
+    if (write_status != TextOk) {
+        log_text_failure(log_info, write_status, "make_sortings::reverse");
+        return write_status;
+    }
 
+    return TextOk;
+}
 
+TextErrno show_text(const text_t* text, FILE* stream) {
+    if (stream == NULL) {
+        stream = stderr;
+    }
 
+    fprintf(stream, "Text [%p]:\n", (const void*) text);
+
+    if (text == NULL) {
+        fprintf(stream, "\tNo text provided\n");
+        return TextInvalidArgs;
+    }
+
+    fprintf(stream, "\tStrings count: %zu\n", text->size);
+    fprintf(stream, "\tStrings array [%p]:\n", (const void*) text->str_array);
+
+    if (text->str_array == NULL) {
+        fprintf(stream, "\t\tNot initialised\n");
+        return TextNullArray;
+    }
+
+    for (size_t i = 0; i < text->size; ++i) {
+        if (text->str_array[i].ptr != NULL) {
+            fprintf(stream, "\t\t[%zu] %.*s\n", i, (int) text->str_array[i].size, text->str_array[i].ptr);
+        }
+    }
+
+    return TextOk;
+}

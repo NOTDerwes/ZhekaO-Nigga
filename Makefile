@@ -1,5 +1,5 @@
 CXX := g++
-CXXFLAGS := -D _DEBUG -ggdb3 -std=c++17 -O0 \
+CXXFLAGS := -I ./header -D _DEBUG -ggdb3 -std=c++17 -O0 \
     -Wall -Wextra -Weffc++ -Wc++14-compat -Wmissing-declarations -Wcast-align -Wcast-qual \
     -Wchar-subscripts -Wconversion -Wctor-dtor-privacy -Wempty-body -Wfloat-equal \
     -Wformat-nonliteral -Wformat-security -Wformat-signedness -Wformat=2 -Winline \
@@ -13,19 +13,30 @@ CXXFLAGS := -D _DEBUG -ggdb3 -std=c++17 -O0 \
     -fsanitize=address,alignment,bool,bounds,enum,float-cast-overflow,float-divide-by-zero,integer-divide-by-zero,nonnull-attribute,null,return,returns-nonnull-attribute,shift,signed-integer-overflow,undefined,unreachable,vla-bound,vptr
 
 SRC_DIR := src
+OBJ_DIR := build
+
 SRC := $(wildcard $(SRC_DIR)/*.c)
-OBJ := $(SRC:$(SRC_DIR)/%.c=%.o)
+OBJ := $(patsubst $(SRC_DIR)/%.c,$(OBJ_DIR)/%.o,$(SRC))
 TARGET := app
 
-.PHONY: build clean
-
-build: $(TARGET)
+.PHONY: compile clean run
 
 $(TARGET): $(OBJ)
-	$(CXX) $(OBJ) -o $@ $(CXXFLAGS)
+	$(CXX) $(CXXFLAGS) -o $@ $(OBJ)
 
-%.o: $(SRC_DIR)/%.c
+$(OBJ_DIR):
+	mkdir -p $(OBJ_DIR)
+
+$(OBJ_DIR)/%.o: $(SRC_DIR)/%.c | $(OBJ_DIR)
+	$(CXX) $(CXXFLAGS) -c $< -o $@
+
+compile: $(TARGET)
+
+run: $(TARGET)
+	./$(TARGET)
+
+$(OBJ_DIR)/error_cases.o: tests/error_cases.c | $(OBJ_DIR)
 	$(CXX) $(CXXFLAGS) -c $< -o $@
 
 clean:
-	rm -f $(OBJ) $(TARGET)
+	rm -rf $(OBJ_DIR) $(TARGET)
